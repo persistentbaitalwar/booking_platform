@@ -1,6 +1,6 @@
 package com.persistent.booking_platform.repository;
 
-import com.persistent.booking_platform.entity.Screen;
+import com.persistent.booking_platform.domain.Screen;
 import jakarta.persistence.LockModeType;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;

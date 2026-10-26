@@ -1,11 +1,11 @@
 package com.persistent.booking_platform.service;
 
-import static com.persistent.booking_platform.model.Requests.BookingRequest;
-import static com.persistent.booking_platform.model.Requests.BulkBookingRequest;
-import static com.persistent.booking_platform.model.Requests.BulkCancelRequest;
-import static com.persistent.booking_platform.model.Responses.BookingResponse;
-import static com.persistent.booking_platform.model.Responses.BulkItemResult;
-import static com.persistent.booking_platform.model.Responses.BulkOperationResponse;
+import static com.persistent.booking_platform.dto.Requests.BookingRequest;
+import static com.persistent.booking_platform.dto.Requests.BulkBookingRequest;
+import static com.persistent.booking_platform.dto.Requests.BulkCancelRequest;
+import static com.persistent.booking_platform.dto.Responses.BookingResponse;
+import static com.persistent.booking_platform.dto.Responses.BulkItemResult;
+import static com.persistent.booking_platform.dto.Responses.BulkOperationResponse;
 
 import com.persistent.booking_platform.exception.ApiException;
 import java.util.ArrayList;
@@ -18,8 +18,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Bulk operations. Not itself
- *  transactional: in the default (partial) mode every item runs in its own
+ * Bulk operations. Not itself transactional: in the default (partial) mode every item runs in its own
  * transaction through {@link BookingService}, so one failure never blocks the others. With allOrNothing the whole
  * batch runs in a single transaction and is rolled back if any item fails.
  */

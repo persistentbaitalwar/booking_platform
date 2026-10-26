@@ -1,11 +1,10 @@
 package com.persistent.booking_platform.service;
 
-import static com.persistent.booking_platform.model.Responses.BookingResponse;
-import static com.persistent.booking_platform.model.Responses.TicketVerification;
+import static com.persistent.booking_platform.dto.Responses.BookingResponse;
+import static com.persistent.booking_platform.dto.Responses.TicketVerification;
 
-import com.persistent.booking_platform.entity.BookingStatus;
+import com.persistent.booking_platform.domain.BookingStatus;
 import com.persistent.booking_platform.exception.ApiException;
-
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 
@@ -24,7 +23,7 @@ public class TicketService {
         BookingResponse booking = bookingService.getBooking(bookingId);
         if (booking.status() != BookingStatus.CONFIRMED) {
             throw ApiException.conflict("BOOKING_NOT_ACTIVE",
-                    "Booking " + bookingId + " is cancelled, so it has no valid ticket");
+                    "Booking " + bookingId + " is not confirmed, so it has no valid ticket");
         }
         return qrCodeService.png(booking.qrPayload());
     }
@@ -39,6 +38,9 @@ public class TicketService {
             booking = bookingService.getBooking(bookingId.get());
         } catch (ApiException ex) {
             return new TicketVerification(false, "No booking exists for this ticket code", null);
+        }
+        if (booking.status() == BookingStatus.PENDING_PAYMENT) {
+            return new TicketVerification(false, "This booking is still waiting for payment", booking);
         }
         if (booking.status() != BookingStatus.CONFIRMED) {
             return new TicketVerification(false, "This booking has been cancelled", booking);

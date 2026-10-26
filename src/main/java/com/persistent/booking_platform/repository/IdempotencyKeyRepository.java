@@ -1,6 +1,6 @@
 package com.persistent.booking_platform.repository;
 
-import com.persistent.booking_platform.entity.IdempotencyKey;
+import com.persistent.booking_platform.domain.IdempotencyKey;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 

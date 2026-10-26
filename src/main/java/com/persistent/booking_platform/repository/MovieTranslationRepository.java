@@ -1,6 +1,6 @@
 package com.persistent.booking_platform.repository;
 
-import com.persistent.booking_platform.entity.MovieTranslation;
+import com.persistent.booking_platform.domain.MovieTranslation;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;

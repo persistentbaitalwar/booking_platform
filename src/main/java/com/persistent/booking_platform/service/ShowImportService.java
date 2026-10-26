@@ -1,17 +1,16 @@
 package com.persistent.booking_platform.service;
 
-import static com.persistent.booking_platform.model.Requests.ShowImportRequest;
-import static com.persistent.booking_platform.model.Requests.ShowRequest;
-import static com.persistent.booking_platform.model.Responses.ImportItemResult;
-import static com.persistent.booking_platform.model.Responses.ImportResponse;
-import static com.persistent.booking_platform.model.Responses.ShowResponse;
+import static com.persistent.booking_platform.dto.Requests.ShowImportRequest;
+import static com.persistent.booking_platform.dto.Requests.ShowRequest;
+import static com.persistent.booking_platform.dto.Responses.ImportItemResult;
+import static com.persistent.booking_platform.dto.Responses.ImportResponse;
+import static com.persistent.booking_platform.dto.Responses.ShowResponse;
 
+import com.persistent.booking_platform.exception.ApiException;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
-
-import com.persistent.booking_platform.exception.ApiException;
 
 /**
  * Entry point for theatres that already run their own IT system: their scheduler pushes a day's or week's shows

@@ -1,19 +1,22 @@
 package com.persistent.booking_platform.service;
 
-import static com.persistent.booking_platform.model.Requests.BookingRequest;
-import static com.persistent.booking_platform.model.Requests.RescheduleRequest;
-import static com.persistent.booking_platform.model.Responses.BookingResponse;
+import static com.persistent.booking_platform.dto.Requests.BookingRequest;
+import static com.persistent.booking_platform.dto.Requests.RescheduleRequest;
+import static com.persistent.booking_platform.dto.Responses.BookingResponse;
 
-import com.persistent.booking_platform.entity.Booking;
-import com.persistent.booking_platform.entity.BookingStatus;
-import com.persistent.booking_platform.entity.Customer;
-import com.persistent.booking_platform.entity.IdempotencyKey;
-import com.persistent.booking_platform.entity.SeatStatus;
-import com.persistent.booking_platform.entity.Show;
-import com.persistent.booking_platform.entity.ShowSeat;
-import com.persistent.booking_platform.entity.ShowStatus;
+import com.persistent.booking_platform.domain.Booking;
+import com.persistent.booking_platform.domain.BookingStatus;
+import com.persistent.booking_platform.domain.Customer;
+import com.persistent.booking_platform.domain.IdempotencyKey;
+import com.persistent.booking_platform.domain.SeatStatus;
+import com.persistent.booking_platform.domain.Show;
+import com.persistent.booking_platform.domain.ShowSeat;
+import com.persistent.booking_platform.domain.ShowStatus;
+import com.persistent.booking_platform.event.BookingEvent;
 import com.persistent.booking_platform.exception.ApiException;
 import com.persistent.booking_platform.payment.PaymentGateway;
+import com.persistent.booking_platform.payment.PaymentOutcome;
+import com.persistent.booking_platform.payment.PaymentProperties;
 import com.persistent.booking_platform.pricing.PriceBreakdown;
 import com.persistent.booking_platform.pricing.PricingService;
 import com.persistent.booking_platform.repository.BookingRepository;
@@ -25,10 +28,12 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.springframework.data.domain.PageRequest;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -52,13 +57,17 @@ public class BookingService {
     private final PaymentGateway paymentGateway;
     private final IdempotencyKeyRepository idempotencyKeyRepository;
     private final QrCodeService qrCodeService;
+    private final OutboxService outboxService;
+    private final PaymentProperties paymentProperties;
     private final Clock clock;
 
     public BookingService(BookingRepository bookingRepository, ShowRepository showRepository,
                           ShowSeatRepository showSeatRepository, CustomerRepository customerRepository,
                           PricingService pricingService, PaymentGateway paymentGateway,
                           IdempotencyKeyRepository idempotencyKeyRepository, QrCodeService qrCodeService,
-                          Clock clock) {
+                          OutboxService outboxService, PaymentProperties paymentProperties, Clock clock) {
+        this.outboxService = outboxService;
+        this.paymentProperties = paymentProperties;
         this.idempotencyKeyRepository = idempotencyKeyRepository;
         this.qrCodeService = qrCodeService;
         this.bookingRepository = bookingRepository;
@@ -105,9 +114,20 @@ public class BookingService {
         List<ShowSeat> ordered = requireAllAvailable(show.getId(), seatNumbers, locked);
 
         PriceBreakdown price = pricingService.price(show, ordered);
-        Booking booking = bookingRepository.save(new Booking(customer, show, price, seatNumbers));
+        Booking draft = new Booking(customer, show, price, seatNumbers);
+        boolean hold = paymentProperties.isHoldMode();
+        if (hold) {
+            draft.markPendingPayment(clock.instant().plus(paymentProperties.holdMinutes(), ChronoUnit.MINUTES));
+        }
+        Booking booking = bookingRepository.save(draft);
         ordered.forEach(seat -> seat.book(booking));
-        paymentGateway.charge(customer.getId(), price.net());
+        if (hold) {
+            // Seats stay held until the gateway reports the payment (see PaymentService); no ticket exists yet.
+            booking.setPaymentReference(paymentGateway.createOrder(booking.getId(), price.net()));
+        } else {
+            paymentGateway.charge(customer.getId(), price.net());
+            outboxService.record(BookingEvent.CONFIRMED, booking, null);
+        }
         if (keyed) {
             idempotencyKeyRepository.saveAndFlush(new IdempotencyKey(idempotencyKey, booking.getId()));
         }
@@ -124,7 +144,8 @@ public class BookingService {
         List<String> newSeatNumbers = normalise(request.seatNumbers());
         Booking booking = bookingRepository.findForUpdate(bookingId).orElseThrow(() -> bookingNotFound(bookingId));
         if (booking.getStatus() != BookingStatus.CONFIRMED) {
-            throw ApiException.conflict("BOOKING_NOT_ACTIVE", "Booking " + bookingId + " is cancelled and cannot be rescheduled");
+            throw ApiException.conflict("BOOKING_NOT_ACTIVE",
+                    "Booking " + bookingId + " is not confirmed, so it cannot be rescheduled");
         }
         requireOutsideCutoff(booking.getShow(), "rescheduled");
 
@@ -164,6 +185,7 @@ public class BookingService {
         } else if (difference.signum() < 0) {
             paymentGateway.refund(customerId, difference.negate());
         }
+        outboxService.record(BookingEvent.RESCHEDULED, booking, null);
         return toResponse(booking);
     }
 
@@ -184,7 +206,8 @@ public class BookingService {
     /** Used when a theatre removes a show: every confirmed booking is cancelled and refunded. */
     @Transactional
     public int cancelConfirmedBookingsForShow(Long showId) {
-        List<Booking> bookings = bookingRepository.findByShowIdAndStatusOrderById(showId, BookingStatus.CONFIRMED);
+        List<Booking> bookings = bookingRepository.findByShowIdAndStatusInOrderById(showId,
+                List.of(BookingStatus.CONFIRMED, BookingStatus.PENDING_PAYMENT));
         bookings.forEach(b -> cancelInternal(b.getId(), false));
         return bookings.size();
     }
@@ -194,7 +217,8 @@ public class BookingService {
         if (booking.getStatus() == BookingStatus.CANCELLED) {
             throw ApiException.conflict("BOOKING_ALREADY_CANCELLED", "Booking " + bookingId + " is already cancelled");
         }
-        if (enforceCutoff) {
+        boolean paid = booking.getStatus() == BookingStatus.CONFIRMED;
+        if (enforceCutoff && paid) {
             requireOutsideCutoff(booking.getShow(), "cancelled");
         }
         List<Long> seatIds = showSeatRepository.findByBookingId(bookingId).stream().map(ShowSeat::getId).toList();
@@ -202,8 +226,70 @@ public class BookingService {
             showSeatRepository.lockByIds(seatIds).forEach(ShowSeat::release);
         }
         booking.cancel(clock.instant());
-        paymentGateway.refund(booking.getCustomer().getId(), booking.getNetAmount());
+        if (paid) {
+            paymentGateway.refund(booking.getCustomer().getId(), booking.getNetAmount());
+        }
+        String reason = !paid ? BookingEvent.REASON_PAYMENT_NOT_COMPLETED
+                : enforceCutoff ? BookingEvent.REASON_CUSTOMER_REQUEST : BookingEvent.REASON_SHOW_DELETED;
+        outboxService.record(BookingEvent.CANCELLED, booking, reason);
         return toResponse(booking);
+    }
+
+    // ------------------------------------------------------------------ payment hold flow
+
+    /** Called when the payment provider reports a successful payment (idempotent: webhooks are delivered more than once). */
+    @Transactional
+    public PaymentOutcome confirmPayment(Long bookingId, String paymentReference) {
+        Booking booking = bookingRepository.findForUpdate(bookingId).orElseThrow(() -> bookingNotFound(bookingId));
+        switch (booking.getStatus()) {
+            case CONFIRMED:
+                return PaymentOutcome.ALREADY_CONFIRMED;
+            case PENDING_PAYMENT:
+                booking.confirm(paymentReference);
+                outboxService.record(BookingEvent.CONFIRMED, booking, null);
+                return PaymentOutcome.CONFIRMED;
+            default:
+                // The hold had expired and the seats may belong to someone else: give the money back.
+                paymentGateway.refund(booking.getCustomer().getId(), booking.getNetAmount());
+                return PaymentOutcome.LATE_PAYMENT_REFUNDED;
+        }
+    }
+
+    /** Called when the payment provider reports a failed or abandoned payment. */
+    @Transactional
+    public PaymentOutcome failPayment(Long bookingId) {
+        Booking booking = bookingRepository.findForUpdate(bookingId).orElseThrow(() -> bookingNotFound(bookingId));
+        if (booking.getStatus() != BookingStatus.PENDING_PAYMENT) {
+            return PaymentOutcome.IGNORED;
+        }
+        releaseHold(booking);
+        return PaymentOutcome.RELEASED;
+    }
+
+    /** @return true when the hold was expired now (false when it is paid, cancelled or still running) */
+    @Transactional
+    public boolean expireHold(Long bookingId) {
+        Booking booking = bookingRepository.findForUpdate(bookingId).orElseThrow(() -> bookingNotFound(bookingId));
+        if (booking.getStatus() != BookingStatus.PENDING_PAYMENT || booking.getHoldExpiresAt() == null
+                || booking.getHoldExpiresAt().isAfter(clock.instant())) {
+            return false;
+        }
+        releaseHold(booking);
+        return true;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Long> findExpiredHoldIds(int limit) {
+        return bookingRepository.findExpiredHoldIds(BookingStatus.PENDING_PAYMENT, clock.instant(), PageRequest.of(0, limit));
+    }
+
+    private void releaseHold(Booking booking) {
+        List<Long> seatIds = showSeatRepository.findByBookingId(booking.getId()).stream().map(ShowSeat::getId).toList();
+        if (!seatIds.isEmpty()) {
+            showSeatRepository.lockByIds(seatIds).forEach(ShowSeat::release);
+        }
+        booking.cancel(clock.instant());
+        outboxService.record(BookingEvent.CANCELLED, booking, BookingEvent.REASON_PAYMENT_NOT_COMPLETED);
     }
 
     private Show loadBookableShow(Long showId) {
@@ -274,6 +360,7 @@ public class BookingService {
                 b.appliedOfferList(), b.getStatus(),
                 b.getStatus() == BookingStatus.CONFIRMED
                         ? qrCodeService.payload(b.getId(), show.getId(), b.seatNumberList()) : null,
-                show.getMovie().getId(), show.getTheatre().getCity().getId());
+                show.getMovie().getId(), show.getTheatre().getCity().getId(), b.getPaymentReference(),
+                b.getHoldExpiresAt() == null ? null : b.getHoldExpiresAt().toString());
     }
 }
