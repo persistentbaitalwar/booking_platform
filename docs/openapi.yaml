@@ -1,0 +1,776 @@
+openapi: 3.0.3
+info:
+  title: Movie Ticket Booking API
+  version: 1.0.0
+  description: |
+    B2C APIs for customers (browse, book, cancel, reschedule, QR tickets) and B2B APIs for theatre partners
+    (onboarding, shows, seat inventory, bulk import).
+
+    * Sign in with `POST /api/v1/auth/login` and send the token as `Authorization: Bearer <token>`.
+    * Browse endpoints are public. Booking needs a CUSTOMER, `/partner/**` needs a PARTNER, reference data needs an ADMIN.
+    * A customer only sees their own bookings and a partner only manages their own theatres; resources of other people
+      answer 404.
+    * All errors use the `ApiError` format.
+    * In payment mode `hold` a booking is `PENDING_PAYMENT` and holds its seats until the payment provider calls the
+      webhook; the QR code exists only after payment.
+    * This file is checked against the running application by the test `OpenApiSpecIT`; the live document is served at
+      `/v3/api-docs` (JSON) and `/v3/api-docs.yaml`, the UI at `/swagger-ui.html`.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: Authentication
+  - name: Browse
+  - name: Bookings
+  - name: Notifications
+  - name: Payments
+  - name: Partner
+  - name: Catalog
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Create a customer account and sign in
+      security: []
+      requestBody: { $ref: '#/components/requestBodies/Register' }
+      responses:
+        '201': { description: Account created, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/register-partner:
+    post:
+      tags: [Authentication]
+      summary: Create a theatre partner account and sign in
+      security: []
+      requestBody: { $ref: '#/components/requestBodies/Register' }
+      responses:
+        '201': { description: Account created, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Sign in and receive an access token
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } }
+      responses:
+        '200': { description: Signed in, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: "Email or password is incorrect (code INVALID_CREDENTIALS)", content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '429': { description: "Too many requests or account locked (code RATE_LIMITED or ACCOUNT_LOCKED)", content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+
+  /api/v1/cities:
+    get:
+      tags: [Catalog]
+      summary: List cities
+      security: []
+      responses:
+        '200': { description: Cities, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CityResponse' } } } } }
+    post:
+      tags: [Catalog]
+      summary: Create a city (admin)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CityRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CityResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/movies:
+    get:
+      tags: [Catalog]
+      summary: List all movies
+      security: []
+      responses:
+        '200': { description: Movies, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MovieResponse' } } } } }
+    post:
+      tags: [Catalog]
+      summary: Create a movie (admin)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MovieRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/MovieResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/movies/{movieId}/translations:
+    post:
+      tags: [Catalog]
+      summary: Add or replace the title of a movie in one language (admin)
+      parameters: [ { $ref: '#/components/parameters/MovieId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TranslationRequest' } } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/TranslationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/customers:
+    post:
+      tags: [Catalog]
+      summary: Create a customer profile without a login (admin)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CustomerRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CustomerResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/offers:
+    post:
+      tags: [Catalog]
+      summary: Switch an offer on for a city, a theatre or everywhere (admin)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OfferRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/OfferResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/cities/{cityId}/movies:
+    get:
+      tags: [Browse]
+      summary: List movies running in a city (filter by language and genre; titles follow Accept-Language)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/CityId' }
+        - { name: language, in: query, required: false, schema: { type: string }, example: Hindi }
+        - { name: genre, in: query, required: false, schema: { type: string }, example: Drama }
+        - { name: Accept-Language, in: header, required: false, schema: { type: string }, example: 'hi-IN,hi;q=0.9' }
+      responses:
+        '200': { description: Movies, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MovieCard' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/movies/{movieId}/theatres:
+    get:
+      tags: [Browse]
+      summary: List theatres running a movie in a city on a date, with show times, free seats and offers
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/MovieId' }
+        - { name: cityId, in: query, required: true, schema: { type: integer, format: int64 } }
+        - { name: date, in: query, required: true, schema: { type: string, format: date }, example: '2026-12-01' }
+      responses:
+        '200': { description: Theatres, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/TheatreShowsResponse' } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/shows/{showId}/seats:
+    get:
+      tags: [Browse]
+      summary: Seat map of a show
+      security: []
+      parameters: [ { $ref: '#/components/parameters/ShowId' } ]
+      responses:
+        '200': { description: Seats, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/SeatResponse' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/shows/{showId}/quote:
+    get:
+      tags: [Browse]
+      summary: Price preview including offers (nothing is reserved)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/ShowId' }
+        - { name: seats, in: query, required: true, description: Comma separated seat numbers in selection order, schema: { type: array, items: { type: string } }, style: form, explode: false, example: 'A1,A2,A3' }
+      responses:
+        '200': { description: Price, content: { application/json: { schema: { $ref: '#/components/schemas/PriceBreakdown' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/bookings:
+    post:
+      tags: [Bookings]
+      summary: Book seats
+      description: Send an Idempotency-Key header (at most 100 characters) so that a retry returns the original booking. In payment mode hold the booking is PENDING_PAYMENT.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, maxLength: 100 } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/BookingRequest' } } } }
+      responses:
+        '201': { description: Booked, content: { application/json: { schema: { $ref: '#/components/schemas/BookingResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: "Seat unavailable (SEAT_UNAVAILABLE), show cancelled, key reused or concurrent change", content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Show already started, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/bookings/{bookingId}:
+    get:
+      tags: [Bookings]
+      summary: Get a booking
+      parameters: [ { $ref: '#/components/parameters/BookingId' } ]
+      responses:
+        '200': { description: Booking, content: { application/json: { schema: { $ref: '#/components/schemas/BookingResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Bookings]
+      summary: Cancel a booking and refund it
+      description: A confirmed booking can be cancelled until 2 hours before the show. An unpaid booking is simply released.
+      parameters: [ { $ref: '#/components/parameters/BookingId' } ]
+      responses:
+        '200': { description: Cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/BookingResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Change window closed, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/bookings/{bookingId}/qr:
+    get:
+      tags: [Bookings]
+      summary: QR code image (PNG) of a confirmed booking
+      parameters: [ { $ref: '#/components/parameters/BookingId' } ]
+      responses:
+        '200': { description: PNG image, content: { image/png: { schema: { type: string, format: binary } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Booking is not confirmed, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/bookings/{bookingId}/reschedule:
+    put:
+      tags: [Bookings]
+      summary: Reschedule a booking to another show of the same movie
+      parameters: [ { $ref: '#/components/parameters/BookingId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RescheduleRequest' } } } }
+      responses:
+        '200': { description: Rescheduled, content: { application/json: { schema: { $ref: '#/components/schemas/BookingResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Different movie, seat count mismatch or change window closed, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/bookings/bulk:
+    post:
+      tags: [Bookings]
+      summary: Bulk booking (partial success or all-or-nothing)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/BulkBookingRequest' } } } }
+      responses:
+        '200': { description: Result per item, content: { application/json: { schema: { $ref: '#/components/schemas/BulkOperationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: allOrNothing batch failed; nothing was changed, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/bookings/bulk-cancel:
+    post:
+      tags: [Bookings]
+      summary: Bulk cancellation (partial success or all-or-nothing)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/BulkCancelRequest' } } } }
+      responses:
+        '200': { description: Result per item, content: { application/json: { schema: { $ref: '#/components/schemas/BulkOperationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: allOrNothing batch failed; nothing was changed, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/customers/{customerId}/bookings:
+    get:
+      tags: [Bookings]
+      summary: List the bookings of a customer
+      parameters: [ { $ref: '#/components/parameters/CustomerId' } ]
+      responses:
+        '200': { description: Bookings, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/BookingResponse' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/customers/{customerId}/notifications:
+    get:
+      tags: [Notifications]
+      summary: Latest messages created by the ticket event pipeline for a customer
+      parameters: [ { $ref: '#/components/parameters/CustomerId' } ]
+      responses:
+        '200': { description: Messages (newest first, at most 50), content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/NotificationResponse' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/payments/webhook:
+    post:
+      tags: [Payments]
+      summary: Payment provider callback
+      description: |
+        The body is signed with HMAC-SHA256 (lower-case hex) using the shared webhook secret and the signature is sent in
+        `X-Signature`. Delivery is idempotent. Status SUCCEEDED confirms the booking, FAILED releases the seats.
+      security: []
+      parameters:
+        - { name: X-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentWebhookEvent' }
+      responses:
+        '200': { description: Processed, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentWebhookResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: Invalid signature (INVALID_SIGNATURE), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/payments/simulator/{bookingId}/pay:
+    post:
+      tags: [Payments]
+      summary: Demo payment gateway for local use, pays a booking that is waiting for payment
+      parameters: [ { $ref: '#/components/parameters/BookingId' } ]
+      responses:
+        '200': { description: Paid and confirmed, content: { application/json: { schema: { $ref: '#/components/schemas/BookingResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Booking not found, or the demo gateway is disabled (SIMULATOR_DISABLED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+
+  /api/v1/partner/theatres:
+    post:
+      tags: [Partner]
+      summary: Onboard a theatre (the caller becomes its owner)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TheatreRequest' } } } }
+      responses:
+        '201': { description: Onboarded, content: { application/json: { schema: { $ref: '#/components/schemas/TheatreResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/partner/theatres/{theatreId}/screens:
+    post:
+      tags: [Partner]
+      summary: Add a screen (seats are generated from rows and seats per row)
+      parameters:
+        - { name: theatreId, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ScreenRequest' } } } }
+      responses:
+        '201': { description: Added, content: { application/json: { schema: { $ref: '#/components/schemas/ScreenResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/partner/shows:
+    post:
+      tags: [Partner]
+      summary: Create a show (seat inventory is generated from the screen layout)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ShowRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/ShowResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Overlaps another show on the screen (SHOW_OVERLAP), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Start time is in the past, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/partner/shows/{showId}:
+    put:
+      tags: [Partner]
+      summary: Update the time or base price of a show
+      parameters: [ { $ref: '#/components/parameters/ShowId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateShowRequest' } } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/ShowResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Seats are booked (SHOW_HAS_BOOKINGS) or the new time overlaps another show, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    delete:
+      tags: [Partner]
+      summary: Delete a show (bookings are cancelled and refunded, remaining seats are blocked)
+      parameters: [ { $ref: '#/components/parameters/ShowId' } ]
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/partner/shows/{showId}/seats:
+    put:
+      tags: [Partner]
+      summary: Allocate and update seat inventory (price, block, release, add seats)
+      parameters: [ { $ref: '#/components/parameters/ShowId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SeatInventoryRequest' } } } }
+      responses:
+        '200': { description: Full seat list after the update, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/SeatResponse' } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Seat already booked (SEAT_ALREADY_BOOKED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /api/v1/partner/shows/import:
+    post:
+      tags: [Partner]
+      summary: Import many shows from a theatre system in one call
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ShowImportRequest' } } } }
+      responses:
+        '200': { description: Result per show, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/partner/tickets/verify:
+    get:
+      tags: [Partner]
+      summary: Verify the text of a ticket QR code at the entrance (only for shows of your own theatres)
+      parameters:
+        - { name: payload, in: query, required: true, description: Text read from the QR code, schema: { type: string } }
+      responses:
+        '200': { description: Verification result, content: { application/json: { schema: { $ref: '#/components/schemas/TicketVerification' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    CityId: { name: cityId, in: path, required: true, schema: { type: integer, format: int64 } }
+    MovieId: { name: movieId, in: path, required: true, schema: { type: integer, format: int64 } }
+    ShowId: { name: showId, in: path, required: true, schema: { type: integer, format: int64 } }
+    BookingId: { name: bookingId, in: path, required: true, schema: { type: integer, format: int64 } }
+    CustomerId: { name: customerId, in: path, required: true, schema: { type: integer, format: int64 } }
+  requestBodies:
+    Register:
+      required: true
+      content: { application/json: { schema: { $ref: '#/components/schemas/RegisterRequest' } } }
+  responses:
+    BadRequest: { description: "Invalid input (VALIDATION_FAILED, MALFORMED_REQUEST, INVALID_PARAMETER, MISSING_PARAMETER and business rules)", content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    Unauthorized: { description: Not signed in (UNAUTHENTICATED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    Forbidden: { description: Not allowed for this role or account (ACCESS_DENIED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    NotFound: { description: Resource not found, or it belongs to someone else, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    Conflict: { description: Conflicts with the current state, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    TooManyRequests: { description: Rate limit reached (RATE_LIMITED), headers: { Retry-After: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  schemas:
+    ApiError:
+      type: object
+      properties:
+        timestamp: { type: string, format: date-time }
+        status: { type: integer, example: 409 }
+        code: { type: string, example: SEAT_UNAVAILABLE }
+        message: { type: string, example: Seat(s) A2 are no longer available. Please choose different seats. }
+        details: { type: array, items: { type: string } }
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, maxLength: 150 }
+        email: { type: string, format: email, maxLength: 200 }
+        password: { type: string, minLength: 8, maxLength: 72, description: At least one letter and one digit }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+    AuthResponse:
+      type: object
+      properties:
+        token: { type: string }
+        tokenType: { type: string, example: Bearer }
+        expiresInSeconds: { type: integer, format: int64 }
+        role: { type: string, enum: [CUSTOMER, PARTNER, ADMIN] }
+        userId: { type: integer, format: int64 }
+        customerId: { type: integer, format: int64, nullable: true }
+        displayName: { type: string }
+    CityRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 100 }
+    CityResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+    MovieRequest:
+      type: object
+      required: [title, language, genre, durationMinutes]
+      properties:
+        title: { type: string, maxLength: 200 }
+        language: { type: string, maxLength: 50 }
+        genre: { type: string, maxLength: 50 }
+        durationMinutes: { type: integer, minimum: 1, maximum: 600 }
+    MovieResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        language: { type: string }
+        genre: { type: string }
+        durationMinutes: { type: integer }
+    MovieCard:
+      type: object
+      description: Movie in a city list; the title is localised when a translation exists
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        language: { type: string }
+        genre: { type: string }
+        durationMinutes: { type: integer }
+    TranslationRequest:
+      type: object
+      required: [locale, title]
+      properties:
+        locale: { type: string, pattern: '^[a-z]{2,3}$', example: hi }
+        title: { type: string, maxLength: 200 }
+    TranslationResponse:
+      type: object
+      properties:
+        movieId: { type: integer, format: int64 }
+        locale: { type: string }
+        title: { type: string }
+    CustomerRequest:
+      type: object
+      required: [name, email]
+      properties:
+        name: { type: string, maxLength: 150 }
+        email: { type: string, format: email }
+    CustomerResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        email: { type: string }
+    OfferRequest:
+      type: object
+      required: [code, type]
+      properties:
+        code: { type: string, maxLength: 50 }
+        type: { $ref: '#/components/schemas/OfferType' }
+        cityId: { type: integer, format: int64, nullable: true }
+        theatreId: { type: integer, format: int64, nullable: true, description: A theatre scope wins over a city scope }
+    OfferType:
+      type: string
+      enum: [THIRD_TICKET_DISCOUNT, AFTERNOON_SHOW_DISCOUNT]
+      description: 50 percent off the third ticket; 20 percent off shows starting from 12:00 until 17:00 (best single discount per ticket, no stacking)
+    OfferResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string }
+        type: { $ref: '#/components/schemas/OfferType' }
+        description: { type: string }
+        cityId: { type: integer, format: int64, nullable: true }
+        theatreId: { type: integer, format: int64, nullable: true }
+    OfferInfo:
+      type: object
+      properties:
+        code: { type: string }
+        type: { $ref: '#/components/schemas/OfferType' }
+        description: { type: string }
+    ShowSlot:
+      type: object
+      properties:
+        showId: { type: integer, format: int64 }
+        screenName: { type: string }
+        startTime: { type: string, example: '19:00:00' }
+        basePrice: { type: number }
+        availableSeats: { type: integer, format: int64 }
+    TheatreShowsResponse:
+      type: object
+      properties:
+        theatreId: { type: integer, format: int64 }
+        theatreName: { type: string }
+        address: { type: string }
+        shows: { type: array, items: { $ref: '#/components/schemas/ShowSlot' } }
+        offers: { type: array, items: { $ref: '#/components/schemas/OfferInfo' } }
+    SeatStatus:
+      type: string
+      enum: [AVAILABLE, BOOKED, BLOCKED]
+    SeatResponse:
+      type: object
+      properties:
+        seatId: { type: integer, format: int64 }
+        seatNumber: { type: string, example: A1 }
+        price: { type: number }
+        status: { $ref: '#/components/schemas/SeatStatus' }
+    TicketPrice:
+      type: object
+      properties:
+        seatNumber: { type: string }
+        price: { type: number }
+        discount: { type: number }
+        payable: { type: number }
+    PriceBreakdown:
+      type: object
+      properties:
+        tickets: { type: array, items: { $ref: '#/components/schemas/TicketPrice' } }
+        gross: { type: number }
+        discount: { type: number }
+        net: { type: number }
+        appliedOffers: { type: array, items: { $ref: '#/components/schemas/OfferType' } }
+    BookingRequest:
+      type: object
+      required: [customerId, showId, seatNumbers]
+      properties:
+        customerId: { type: integer, format: int64, description: Must be the signed-in customer }
+        showId: { type: integer, format: int64 }
+        seatNumbers: { type: array, minItems: 1, maxItems: 10, items: { type: string }, example: [A1, A2, A3], description: The third seat in this order gets the third-ticket offer }
+    BookingStatus:
+      type: string
+      enum: [PENDING_PAYMENT, CONFIRMED, CANCELLED]
+    BookingResponse:
+      type: object
+      properties:
+        bookingId: { type: integer, format: int64 }
+        customerId: { type: integer, format: int64 }
+        showId: { type: integer, format: int64 }
+        movieTitle: { type: string }
+        theatreName: { type: string }
+        screenName: { type: string }
+        showDate: { type: string, format: date }
+        startTime: { type: string, example: '19:00:00' }
+        seatNumbers: { type: array, items: { type: string } }
+        grossAmount: { type: number }
+        discountAmount: { type: number }
+        netAmount: { type: number }
+        appliedOffers: { type: array, items: { type: string } }
+        status: { $ref: '#/components/schemas/BookingStatus' }
+        qrPayload: { type: string, nullable: true, description: Signed ticket text (only when CONFIRMED); render it as a QR code or use the qr endpoint }
+        movieId: { type: integer, format: int64 }
+        cityId: { type: integer, format: int64 }
+        paymentReference: { type: string, nullable: true }
+        holdExpiresAt: { type: string, format: date-time, nullable: true, description: Seats are released if payment does not arrive by this time }
+    RescheduleRequest:
+      type: object
+      required: [newShowId, seatNumbers]
+      properties:
+        newShowId: { type: integer, format: int64 }
+        seatNumbers: { type: array, minItems: 1, items: { type: string }, description: Exactly as many seats as the booking has }
+    BulkBookingRequest:
+      type: object
+      required: [bookings]
+      properties:
+        bookings: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/BookingRequest' } }
+        allOrNothing: { type: boolean, default: false }
+    BulkCancelRequest:
+      type: object
+      required: [bookingIds]
+      properties:
+        bookingIds: { type: array, minItems: 1, maxItems: 50, items: { type: integer, format: int64 } }
+        allOrNothing: { type: boolean, default: false }
+    BulkItemResult:
+      type: object
+      properties:
+        index: { type: integer }
+        success: { type: boolean }
+        bookingId: { type: integer, format: int64, nullable: true }
+        status: { $ref: '#/components/schemas/BookingStatus' }
+        errorCode: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+    BulkOperationResponse:
+      type: object
+      properties:
+        results: { type: array, items: { $ref: '#/components/schemas/BulkItemResult' } }
+        succeeded: { type: integer }
+        failed: { type: integer }
+    NotificationResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        bookingId: { type: integer, format: int64 }
+        message: { type: string }
+        createdAt: { type: string, format: date-time }
+    PaymentWebhookEvent:
+      type: object
+      required: [bookingId, status]
+      properties:
+        eventId: { type: string }
+        bookingId: { type: integer, format: int64 }
+        paymentReference: { type: string }
+        status: { type: string, enum: [SUCCEEDED, FAILED] }
+    PaymentWebhookResponse:
+      type: object
+      properties:
+        outcome: { type: string, enum: [CONFIRMED, ALREADY_CONFIRMED, LATE_PAYMENT_REFUNDED, RELEASED, IGNORED] }
+    TheatreRequest:
+      type: object
+      required: [name, address, cityId]
+      properties:
+        name: { type: string, maxLength: 150 }
+        address: { type: string, maxLength: 300 }
+        cityId: { type: integer, format: int64 }
+    TheatreResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        address: { type: string }
+        cityId: { type: integer, format: int64 }
+        cityName: { type: string }
+    ScreenRequest:
+      type: object
+      required: [name, rows, seatsPerRow]
+      properties:
+        name: { type: string, maxLength: 100 }
+        rows: { type: integer, minimum: 1, maximum: 26 }
+        seatsPerRow: { type: integer, minimum: 1, maximum: 50 }
+    ScreenResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        theatreId: { type: integer, format: int64 }
+        name: { type: string }
+        rows: { type: integer }
+        seatsPerRow: { type: integer }
+        totalSeats: { type: integer }
+    ShowRequest:
+      type: object
+      required: [movieId, screenId, showDate, startTime, basePrice]
+      properties:
+        movieId: { type: integer, format: int64 }
+        screenId: { type: integer, format: int64 }
+        showDate: { type: string, format: date }
+        startTime: { type: string, example: '19:00' }
+        basePrice: { type: number, minimum: 0.01 }
+    UpdateShowRequest:
+      type: object
+      description: Every field is optional; the time cannot change once seats are booked
+      properties:
+        showDate: { type: string, format: date, nullable: true }
+        startTime: { type: string, example: '19:30', nullable: true }
+        basePrice: { type: number, minimum: 0.01, nullable: true }
+    ShowResponse:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        movieId: { type: integer, format: int64 }
+        movieTitle: { type: string }
+        theatreId: { type: integer, format: int64 }
+        theatreName: { type: string }
+        screenName: { type: string }
+        showDate: { type: string, format: date }
+        startTime: { type: string }
+        basePrice: { type: number }
+        status: { type: string, enum: [ACTIVE, CANCELLED] }
+        availableSeats: { type: integer, format: int64 }
+    SeatSpec:
+      type: object
+      required: [seatNumber]
+      properties:
+        seatNumber: { type: string, pattern: '^[A-Z][0-9]{1,2}$', example: A1 }
+        price: { type: number, minimum: 0, nullable: true, description: Required when the seat is new }
+        status: { type: string, enum: [AVAILABLE, BLOCKED], nullable: true }
+    SeatInventoryRequest:
+      type: object
+      required: [seats]
+      properties:
+        seats: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/SeatSpec' } }
+    ShowImportRequest:
+      type: object
+      required: [shows]
+      properties:
+        shows: { type: array, minItems: 1, maxItems: 200, items: { $ref: '#/components/schemas/ShowRequest' } }
+    ImportItemResult:
+      type: object
+      properties:
+        index: { type: integer }
+        success: { type: boolean }
+        showId: { type: integer, format: int64, nullable: true }
+        errorCode: { type: string, nullable: true }
+        message: { type: string, nullable: true }
+    ImportResponse:
+      type: object
+      properties:
+        results: { type: array, items: { $ref: '#/components/schemas/ImportItemResult' } }
+        imported: { type: integer }
+        failed: { type: integer }
+    TicketVerification:
+      type: object
+      properties:
+        valid: { type: boolean }
+        reason: { type: string }
+        booking: { allOf: [ { $ref: '#/components/schemas/BookingResponse' } ], nullable: true }

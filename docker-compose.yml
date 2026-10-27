@@ -1,0 +1,82 @@
+# Local infrastructure and full stack.
+#   Only Kafka + Kafka UI (run the backend yourself):  docker compose up -d kafka kafka-ui
+#   Everything (PostgreSQL, Kafka, backend, UI):       docker compose up --build
+# Ports: UI 3000, API + Swagger 8080, Kafka for your machine 9094, Kafka UI 8090, PostgreSQL 5432
+services:
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,EXTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9094:9094"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      retries: 20
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8090:8080"
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: movies
+      POSTGRES_USER: movies
+      POSTGRES_PASSWORD: movies
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U movies"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: postgres
+      DB_URL: jdbc:postgresql://db:5432/movies
+      DB_USER: movies
+      DB_PASSWORD: movies
+      DDL_AUTO: update
+      QR_SECRET: change-me-to-a-long-random-value-in-real-environments
+      JWT_SECRET: change-me-jwt-secret-at-least-32-characters-long-0123456789
+      PAYMENT_WEBHOOK_SECRET: change-me-webhook-secret-0123456789
+      PAYMENT_MODE: hold
+      PAYMENT_SIMULATOR: "true"
+      CORS_ORIGINS: http://localhost:3000
+      APP_KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP: kafka:9092
+      APP_SEED_DEMO_DATA: "true"
+      H2_CONSOLE: "false"
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
