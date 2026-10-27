@@ -1,16 +1,16 @@
 package com.persistent.booking_platform.service;
 
-import static com.persistent.booking_platform.model.Requests.*;
-import static com.persistent.booking_platform.model.Responses.*;
+import static com.persistent.booking_platform.dto.Requests.*;
+import static com.persistent.booking_platform.dto.Responses.*;
 
-import com.persistent.booking_platform.entity.City;
-import com.persistent.booking_platform.entity.Movie;
-import com.persistent.booking_platform.entity.Screen;
-import com.persistent.booking_platform.entity.SeatStatus;
-import com.persistent.booking_platform.entity.Show;
-import com.persistent.booking_platform.entity.ShowSeat;
-import com.persistent.booking_platform.entity.ShowStatus;
-import com.persistent.booking_platform.entity.Theatre;
+import com.persistent.booking_platform.domain.City;
+import com.persistent.booking_platform.domain.Movie;
+import com.persistent.booking_platform.domain.Screen;
+import com.persistent.booking_platform.domain.SeatStatus;
+import com.persistent.booking_platform.domain.Show;
+import com.persistent.booking_platform.domain.ShowSeat;
+import com.persistent.booking_platform.domain.ShowStatus;
+import com.persistent.booking_platform.domain.Theatre;
 import com.persistent.booking_platform.exception.ApiException;
 import com.persistent.booking_platform.repository.CityRepository;
 import com.persistent.booking_platform.repository.MovieRepository;
@@ -58,6 +58,12 @@ public class PartnerService {
 
     @Transactional
     public TheatreResponse onboardTheatre(TheatreRequest request) {
+        return onboardTheatre(request, null);
+    }
+
+    /** @param ownerUserId the partner account that owns the theatre; only the owner (or an admin) may manage it */
+    @Transactional
+    public TheatreResponse onboardTheatre(TheatreRequest request, Long ownerUserId) {
         City city = cityRepository.findById(request.cityId()).orElseThrow(() ->
                 ApiException.notFound("CITY_NOT_FOUND", "City " + request.cityId() + " was not found"));
         String name = request.name().trim();
@@ -65,7 +71,9 @@ public class PartnerService {
             throw ApiException.conflict("THEATRE_EXISTS",
                     "Theatre '" + name + "' is already onboarded in " + city.getName());
         }
-        Theatre theatre = theatreRepository.save(new Theatre(name, request.address().trim(), city));
+        Theatre draft = new Theatre(name, request.address().trim(), city);
+        draft.assignOwner(ownerUserId);
+        Theatre theatre = theatreRepository.save(draft);
         return new TheatreResponse(theatre.getId(), theatre.getName(), theatre.getAddress(), city.getId(), city.getName());
     }
 

@@ -1,6 +1,6 @@
 package com.persistent.booking_platform.repository;
 
-import com.persistent.booking_platform.entity.City;
+import com.persistent.booking_platform.domain.City;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 

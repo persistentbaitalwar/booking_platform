@@ -1,14 +1,14 @@
 package com.persistent.booking_platform.service;
 
-import static com.persistent.booking_platform.model.Requests.*;
-import static com.persistent.booking_platform.model.Responses.*;
+import static com.persistent.booking_platform.dto.Requests.*;
+import static com.persistent.booking_platform.dto.Responses.*;
 
-import com.persistent.booking_platform.entity.City;
-import com.persistent.booking_platform.entity.Customer;
-import com.persistent.booking_platform.entity.Movie;
-import com.persistent.booking_platform.entity.MovieTranslation;
-import com.persistent.booking_platform.entity.Offer;
-import com.persistent.booking_platform.entity.Theatre;
+import com.persistent.booking_platform.domain.City;
+import com.persistent.booking_platform.domain.Customer;
+import com.persistent.booking_platform.domain.Movie;
+import com.persistent.booking_platform.domain.MovieTranslation;
+import com.persistent.booking_platform.domain.Offer;
+import com.persistent.booking_platform.domain.Theatre;
 import com.persistent.booking_platform.exception.ApiException;
 import com.persistent.booking_platform.repository.CityRepository;
 import com.persistent.booking_platform.repository.CustomerRepository;

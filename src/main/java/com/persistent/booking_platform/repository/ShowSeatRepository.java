@@ -1,7 +1,7 @@
 package com.persistent.booking_platform.repository;
 
-import com.persistent.booking_platform.entity.SeatStatus;
-import com.persistent.booking_platform.entity.ShowSeat;
+import com.persistent.booking_platform.domain.SeatStatus;
+import com.persistent.booking_platform.domain.ShowSeat;
 import jakarta.persistence.LockModeType;
 import java.util.Collection;
 import java.util.List;

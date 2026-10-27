@@ -1,8 +1,8 @@
 package com.persistent.booking_platform.repository;
 
-import com.persistent.booking_platform.entity.Movie;
-import com.persistent.booking_platform.entity.Show;
-import com.persistent.booking_platform.entity.ShowStatus;
+import com.persistent.booking_platform.domain.Movie;
+import com.persistent.booking_platform.domain.Show;
+import com.persistent.booking_platform.domain.ShowStatus;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;

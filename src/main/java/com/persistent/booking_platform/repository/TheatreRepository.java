@@ -1,6 +1,6 @@
 package com.persistent.booking_platform.repository;
 
-import com.persistent.booking_platform.entity.Theatre;
+import com.persistent.booking_platform.domain.Theatre;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface TheatreRepository extends JpaRepository<Theatre, Long> {

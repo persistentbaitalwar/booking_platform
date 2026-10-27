@@ -1,8 +1,23 @@
 package com.persistent.booking_platform.service;
 
-import static com.persistent.booking_platform.model.Responses.*;
+import static com.persistent.booking_platform.dto.Responses.*;
 
-
+import com.persistent.booking_platform.domain.Movie;
+import com.persistent.booking_platform.domain.MovieTranslation;
+import com.persistent.booking_platform.domain.Offer;
+import com.persistent.booking_platform.domain.SeatStatus;
+import com.persistent.booking_platform.domain.Show;
+import com.persistent.booking_platform.domain.ShowSeat;
+import com.persistent.booking_platform.domain.ShowStatus;
+import com.persistent.booking_platform.domain.Theatre;
+import com.persistent.booking_platform.exception.ApiException;
+import com.persistent.booking_platform.pricing.PriceBreakdown;
+import com.persistent.booking_platform.pricing.PricingService;
+import com.persistent.booking_platform.repository.CityRepository;
+import com.persistent.booking_platform.repository.MovieRepository;
+import com.persistent.booking_platform.repository.MovieTranslationRepository;
+import com.persistent.booking_platform.repository.ShowRepository;
+import com.persistent.booking_platform.repository.ShowSeatRepository;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -17,21 +32,6 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.persistent.booking_platform.entity.Movie;
-import com.persistent.booking_platform.entity.Offer;
-import com.persistent.booking_platform.entity.SeatStatus;
-import com.persistent.booking_platform.entity.Show;
-import com.persistent.booking_platform.entity.ShowSeat;
-import com.persistent.booking_platform.entity.ShowStatus;
-import com.persistent.booking_platform.entity.Theatre;
-import com.persistent.booking_platform.exception.ApiException;
-import com.persistent.booking_platform.repository.CityRepository;
-import com.persistent.booking_platform.repository.MovieRepository;
-import com.persistent.booking_platform.repository.MovieTranslationRepository;
-import com.persistent.booking_platform.repository.ShowRepository;
-import com.persistent.booking_platform.repository.ShowSeatRepository;
-
-
 /** Read-only B2C use cases: browse theatres and shows, view the seat map, get a price quote. */
 @Service
 @Transactional(readOnly = true)
@@ -41,7 +41,7 @@ public class BrowseService {
     private final MovieRepository movieRepository;
     private final CityRepository cityRepository;
     private final PricingService pricingService;
-    
+    private final MovieTranslationRepository translationRepository;
     private final Clock clock;
 
     public BrowseService(ShowRepository showRepository, ShowSeatRepository showSeatRepository,
